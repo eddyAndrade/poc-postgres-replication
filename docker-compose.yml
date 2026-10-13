@@ -1,0 +1,105 @@
+services:
+  postgres-primary:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    container_name: postgres-primary
+    hostname: postgres-primary
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - primary_data:/var/lib/postgresql/data
+      - ./scripts/primary:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${PRIMARY_PORT:-5432}:5432"
+    networks:
+      - postgres-replica
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  postgres-replica1:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    container_name: postgres-replica1
+    hostname: postgres-replica1
+    env_file: .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      REPLICATION_PRIMARY_HOST: postgres-primary
+      REPLICATION_PRIMARY_PORT: 5432
+      REPLICATION_USER: ${REPLICATION_USER}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    volumes:
+      - replica1_data:/var/lib/postgresql/data
+      - ./scripts/replica/entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+      - ./config/replica/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    entrypoint: ["/usr/local/bin/replica-entrypoint.sh"]
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "${REPLICA1_PORT:-5433}:5432"
+    networks:
+      - postgres-replica
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  postgres-replica2:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    container_name: postgres-replica2
+    hostname: postgres-replica2
+    env_file: .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      REPLICATION_PRIMARY_HOST: postgres-primary
+      REPLICATION_PRIMARY_PORT: 5432
+      REPLICATION_USER: ${REPLICATION_USER}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+    volumes:
+      - replica2_data:/var/lib/postgresql/data
+      - ./scripts/replica/entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+      - ./config/replica/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    entrypoint: ["/usr/local/bin/replica-entrypoint.sh"]
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "${REPLICA2_PORT:-5434}:5432"
+    networks:
+      - postgres-replica
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  primary_data:
+    driver: local
+  replica1_data:
+    driver: local
+  replica2_data:
+    driver: local
+
+networks:
+  postgres-replica:
+    driver: bridge
