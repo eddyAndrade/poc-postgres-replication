@@ -1,10 +1,10 @@
-# PostgreSQL Streaming Replication com Docker Compose
+# PostgreSQL Streaming Replication with Docker Compose
 
-Este projeto provisiona um cluster PostgreSQL com **1 primário (master)** e **2 réplicas em hot standby** utilizando Docker Compose, seguindo boas práticas de produção.
+This project provisions a PostgreSQL cluster with **1 primary (master)** and **2 hot standby replicas** using Docker Compose, following production best practices.
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -12,7 +12,7 @@ Este projeto provisiona um cluster PostgreSQL com **1 primário (master)** e **2
 │                     (postgres-replica)                      │
 │                                                             │
 │   ┌─────────────────┐                                       │
-│   │ postgres-primary│  ← Escrita + Leitura                  │
+│   │ postgres-primary│  ← Writes + Reads                     │
 │   └────────┬────────┘                                       │
 │            │ Streaming Replication (WAL)                     │
 │            ├──────────────────────┐                         │
@@ -20,132 +20,132 @@ Este projeto provisiona um cluster PostgreSQL com **1 primário (master)** e **2
 │   ┌────────▼────────┐    ┌───────▼────────┐               │
 │   │ postgres-replica1│    │postgres-replica2│               │
 │   │   Hot Standby    │    │   Hot Standby    │               │
-│   │   Só Leitura     │    │   Só Leitura     │               │
+│   │   Read Only      │    │   Read Only      │               │
 │   └──────────────────┘    └──────────────────┘               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Características
+### Features
 
-- **Streaming Replication**: As réplicas recebem WALs (Write-Ahead Logs) do primário em tempo real.
-- **Hot Standby**: As réplicas aceitam consultas de leitura (`SELECT`) simultaneamente à replicação.
-- **Replicação Síncrona**: Configurada com `synchronous_commit = remote_apply` e `FIRST 1`, garantindo que pelo menos uma réplica aplique a transação antes do primário confirmar ao cliente (máxima durabilidade sem sacrificar totalmente a performance).
-- **Replication Slots**: Slots físicos persistentes (`replica1_slot`, `replica2_slot`) evitam que o primário remova arquivos WAL antes que as réplicas os consumam, prevenindo desync em caso de réplica lenta ou offline.
-- **Inicialização Automática**: Réplicas utilizam `pg_basebackup` para clonar o primário automaticamente na primeira execução.
-- **Health Checks**: Todos os containers possuem verificações de saúde (`pg_isready`).
-- **Segurança**: Autenticação `scram-sha-256`, rede isolada, usuário dedicado para replicação.
+- **Streaming Replication**: Replicas receive WAL (Write-Ahead Logs) from the primary in real time.
+- **Hot Standby**: Replicas accept read queries (`SELECT`) concurrently with replication.
+- **Synchronous Replication**: Configured with `synchronous_commit = remote_apply` and `FIRST 1`, ensuring at least one replica applies the transaction before the primary confirms to the client (maximum durability without entirely sacrificing performance).
+- **Replication Slots**: Persistent physical slots (`replica1_slot`, `replica2_slot`) prevent the primary from removing WAL files before the replicas consume them, avoiding desync in case of a slow or offline replica.
+- **Automatic Bootstrap**: Replicas use `pg_basebackup` to clone the primary automatically on first run.
+- **Health Checks**: All containers have health checks (`pg_isready`).
+- **Security**: `scram-sha-256` authentication, isolated network, dedicated replication user.
 
 ---
 
-## Estrutura do Projeto
+## Project Structure
 
 ```
 .
-├── .env.example                      # Variáveis de ambiente (template)
-├── .gitignore                        # Ignora .env e dados locais
-├── docker-compose.yml                # Orquestração dos serviços
-├── README.md                         # Este arquivo
+├── .env.example                      # Environment variables (template)
+├── .gitignore                        # Ignores .env and local data
+├── docker-compose.yml                # Service orchestration
+├── README.md                         # This file
 ├── config/
 │   └── replica/
-│       └── postgresql.conf           # Configuração das réplicas
+│       └── postgresql.conf           # Replica configuration
 └── scripts/
     ├── primary/
-    │   ├── 01-init-replication.sh    # Cria usuário e slots de replicação
-    │   └── 99-configure-replication.sh # Configura postgresql.conf e pg_hba.conf
+    │   ├── 01-init-replication.sh    # Creates replication user and slots
+    │   └── 99-configure-replication.sh # Configures postgresql.conf and pg_hba.conf
     └── replica/
-        └── entrypoint.sh             # Entrypoint customizado (pg_basebackup)
+        └── entrypoint.sh             # Custom entrypoint (pg_basebackup)
 ```
 
 ---
 
-## Pré-requisitos
+## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) 20.10+
-- [Docker Compose](https://docs.docker.com/compose/install/) 2.20+ (suporte a `depends_on` com `condition`)
+- [Docker Compose](https://docs.docker.com/compose/install/) 2.20+ (`depends_on` with `condition` support)
 
 ---
 
-## Início Rápido
+## Quick Start
 
-### 1. Clone ou copie o projeto
+### 1. Clone or copy the project
 
 ```bash
 cd postgre-replica
 ```
 
-### 2. Configure as variáveis de ambiente
+### 2. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` e altere as senhas padrão:
+Edit the `.env` file and change the default passwords:
 
 ```dotenv
-POSTGRES_PASSWORD=SuaSenhaSeguraAqui123!
-REPLICATION_PASSWORD=SuaSenhaDeReplicacao456!
+POSTGRES_PASSWORD=YourSecurePasswordHere123!
+REPLICATION_PASSWORD=YourSecureReplicationPassword456!
 ```
 
-> ⚠️ **Nunca commite o arquivo `.env` no Git.** Ele já está listado no `.gitignore`.
+> ⚠️ **Never commit the `.env` file to Git.** It is already listed in `.gitignore`.
 
-### 3. Inicie o cluster
+### 3. Start the cluster
 
 ```bash
 docker compose up -d
 ```
 
-O Docker Compose irá:
-1. Criar a rede `postgres-replica`.
-2. Iniciar o `postgres-primary`, criar o banco, o usuário de replicação e os slots.
-3. Aguardar o primário ficar saudável.
-4. Iniciar `postgres-replica1` e `postgres-replica2`, executando `pg_basebackup` para clonar os dados.
+Docker Compose will:
+1. Create the `postgres-replica` network.
+2. Start `postgres-primary`, create the database, the replication user, and the slots.
+3. Wait for the primary to become healthy.
+4. Start `postgres-replica1` and `postgres-replica2`, running `pg_basebackup` to clone the data.
 
-### 4. Verifique o status
+### 4. Check the status
 
 ```bash
-# Status dos containers
+# Container status
 docker compose ps
 
-# Logs do primário
+# Primary logs
 docker compose logs -f postgres-primary
 
-# Logs das réplicas
+# Replica logs
 docker compose logs -f postgres-replica1
 docker compose logs -f postgres-replica2
 ```
 
 ---
 
-## Validação da Replicação
+## Replication Validation
 
-### Conecte-se ao primário
+### Connect to the primary
 
 ```bash
 docker exec -i postgres-primary psql -U postgres -d app_database
 ```
 
-Crie uma tabela de teste:
+Create a test table:
 
 ```sql
 CREATE TABLE test_replication (id SERIAL PRIMARY KEY, message TEXT, created_at TIMESTAMP DEFAULT NOW());
 INSERT INTO test_replication (message) VALUES ('Hello from Primary!');
 ```
 
-### Conecte-se a uma réplica
+### Connect to a replica
 
 ```bash
 docker exec -i postgres-replica1 psql -U postgres -d app_database
 ```
 
-Verifique se os dados replicaram:
+Verify the data was replicated:
 
 ```sql
 SELECT * FROM test_replication;
 ```
 
-> A réplica está em hot standby, portanto comandos de escrita (`INSERT`, `UPDATE`, `DELETE`, `CREATE`) serão rejeitados. Isso é esperado.
+> The replica is in hot standby, so write commands (`INSERT`, `UPDATE`, `DELETE`, `CREATE`) will be rejected. This is expected.
 
-### Verificar status da replicação no primário
+### Check replication status on the primary
 
 ```bash
 docker exec -i postgres-primary psql -U postgres -c "
@@ -161,7 +161,7 @@ FROM pg_stat_replication;
 "
 ```
 
-Saída esperada (semelhante a):
+Expected output (similar to):
 
 ```
   client_addr  |   state   | sent_lsn  | write_lsn | flush_lsn | replay_lsn | sync_state
@@ -170,11 +170,11 @@ Saída esperada (semelhante a):
  172.23.0.3    | streaming | 0/4000060 | 0/4000060 | 0/4000060 | 0/4000060  | potential
 ```
 
-- **`sync`**: Réplica síncrona atual (confirma transações).
-- **`potential`**: Réplica assíncrona (pronta para virar síncrona se a outra falhar).
-- **`streaming`**: WAL está sendo transmitido em tempo real.
+- **`sync`**: Current synchronous replica (confirms transactions).
+- **`potential`**: Asynchronous replica (ready to become synchronous if the other one fails).
+- **`streaming`**: WAL is being streamed in real time.
 
-### Verificar slots de replicação
+### Check replication slots
 
 ```bash
 docker exec -i postgres-primary psql -U postgres -c "
@@ -185,125 +185,125 @@ FROM pg_replication_slots;
 
 ---
 
-## Portas e Acesso
+## Ports and Access
 
-| Serviço             | Host Port | Container Port |
+| Service             | Host Port | Container Port |
 |---------------------|-----------|----------------|
 | postgres-primary    | 5432      | 5432           |
 | postgres-replica1   | 5433      | 5432           |
 | postgres-replica2   | 5434      | 5432           |
 
-### Exemplo de conexão via psql (do host)
+### Connection example via psql (from the host)
 
 ```bash
-# Primário (leitura e escrita)
+# Primary (read and write)
 psql -h localhost -p 5432 -U postgres -d app_database
 
-# Réplica 1 (somente leitura)
+# Replica 1 (read only)
 psql -h localhost -p 5433 -U postgres -d app_database
 
-# Réplica 2 (somente leitura)
+# Replica 2 (read only)
 psql -h localhost -p 5434 -U postgres -d app_database
 ```
 
 ---
 
-## Boas Práticas Aplicadas
+## Best Practices Applied
 
-1. **Senhas em `.env`**: Credenciais não estão hardcoded no `docker-compose.yml`.
-2. **Usuário dedicado**: `replicator` possui apenas o privilégio `REPLICATION`, minimizando o impacto de credenciais vazadas.
-3. **Rede isolada**: Bridge network dedicada (`postgres-replica`) isolando o tráfego do cluster.
-4. **Autenticação forte**: `scram-sha-256` ao invés de `md5` ou `trust`.
-5. **Replication Slots**: Garantem que o primário retenha WALs necessários para réplicas lentas ou temporariamente offline.
-6. **Sincronização configurável**: `FIRST 1` permite que o primário continue operando mesmo se uma réplica cair, mantendo durabilidade com a réplica restante.
-7. **Hot Standby Feedback**: `hot_standby_feedback = on` evita que o autovacuum do primário remova tuplas ainda necessárias para queries longas nas réplicas.
-8. **Health Checks**: Garantem que réplicas só iniciem após o primário estar pronto.
-9. **Volumes nomeados**: Dados persistem entre reinicializações dos containers (`primary_data`, `replica1_data`, `replica2_data`).
-10. **Restart Policy**: `unless-stopped` garante que os serviços se recuperem automaticamente após falhas (exceto parada manual).
+1. **Passwords in `.env`**: Credentials are not hardcoded in `docker-compose.yml`.
+2. **Dedicated user**: `replicator` has only the `REPLICATION` privilege, minimizing the impact of leaked credentials.
+3. **Isolated network**: Dedicated bridge network (`postgres-replica`) isolating cluster traffic.
+4. **Strong authentication**: `scram-sha-256` instead of `md5` or `trust`.
+5. **Replication Slots**: Ensure the primary retains WAL needed for slow or temporarily offline replicas.
+6. **Configurable synchronization**: `FIRST 1` allows the primary to keep operating even if one replica goes down, maintaining durability with the remaining replica.
+7. **Hot Standby Feedback**: `hot_standby_feedback = on` prevents the primary's autovacuum from removing tuples still needed by long-running queries on the replicas.
+8. **Health Checks**: Ensure replicas only start after the primary is ready.
+9. **Named volumes**: Data persists across container restarts (`primary_data`, `replica1_data`, `replica2_data`).
+10. **Restart Policy**: `unless-stopped` ensures services automatically recover after failures (except manual stops).
 
 ---
 
-## Manutenção e Operações
+## Maintenance and Operations
 
-### Reiniciar o cluster
+### Restart the cluster
 
 ```bash
 docker compose restart
 ```
 
-### Parar o cluster
+### Stop the cluster
 
 ```bash
 docker compose down
 ```
 
-> Os volumes persistem. Ao subir novamente (`docker compose up -d`), os dados serão mantidos.
+> Volumes persist. When starting again (`docker compose up -d`), data will be preserved.
 
-### Destruir tudo (incluindo dados!)
+### Destroy everything (including data!)
 
 ```bash
 docker compose down -v
 ```
 
-> **Atenção:** Isso remove os volumes `primary_data`, `replica1_data` e `replica2_data`. Todos os dados serão perdidos.
+> **Warning:** This removes the `primary_data`, `replica1_data`, and `replica2_data` volumes. All data will be lost.
 
-### Forçar ressincronização de uma réplica
+### Force resync of a replica
 
-Se uma réplica ficar desincronizada ou corrompida:
+If a replica becomes desynchronized or corrupted:
 
 ```bash
-# 1. Pare a réplica
+# 1. Stop the replica
 docker compose stop postgres-replica1
 
-# 2. Remova o volume
+# 2. Remove the volume
 docker volume rm postgre-replica_replica1_data
 
-# 3. Recrie e reinicie
+# 3. Recreate and restart
 docker compose up -d postgres-replica1
 ```
 
-A réplica executará `pg_basebackup` novamente e se reconectará ao primário.
+The replica will run `pg_basebackup` again and reconnect to the primary.
 
-### Promover uma réplica para primário (Failover Manual)
+### Promote a replica to primary (Manual Failover)
 
-Em caso de falha do primário, você pode promover uma réplica:
+In case of primary failure, you can promote a replica:
 
 ```bash
-# Pare o primário (se ainda estiver rodando)
+# Stop the primary (if still running)
 docker compose stop postgres-primary
 
-# Promova a réplica 1
+# Promote replica 1
 docker exec postgres-replica1 pg_ctl promote -D /var/lib/postgresql/data/pgdata
 ```
 
-> **Nota:** Este setup não implementa failover automático. Para alta disponibilidade automática, considere ferramentas como [Patroni](https://github.com/zalando/patroni), [Repmgr](https://repmgr.org/) ou [PgBouncer](https://www.pgbouncer.org/) com um proxy de conexão.
+> **Note:** This setup does not implement automatic failover. For automatic high availability, consider tools like [Patroni](https://github.com/zalando/patroni), [Repmgr](https://repmgr.org/), or [PgBouncer](https://www.pgbouncer.org/) with a connection proxy.
 
 ---
 
 ## Troubleshooting
 
-### Réplica não conecta ao primário
+### Replica does not connect to the primary
 
 ```bash
 docker compose logs postgres-replica1
 ```
 
-Verifique:
-- Se o primário está saudável: `docker compose ps`
-- Se as credenciais em `.env` são consistentes
-- Se a rede Docker está funcionando: `docker network inspect postgre-replica_postgres-replica`
+Check:
+- Whether the primary is healthy: `docker compose ps`
+- Whether the credentials in `.env` are consistent
+- Whether the Docker network is working: `docker network inspect postgre-replica_postgres-replica`
 
-### `pg_basebackup` falha com "password authentication failed"
+### `pg_basebackup` fails with "password authentication failed"
 
-Certifique-se de que o `.env` foi criado **antes** do primeiro `docker compose up`. Se mudar as senhas após a criação dos volumes, destrua os volumes (`docker compose down -v`) e suba novamente.
+Make sure `.env` was created **before** the first `docker compose up`. If you change passwords after the volumes are created, destroy the volumes (`docker compose down -v`) and start again.
 
-### Réplica fica em `catchup` por muito tempo
+### Replica stays in `catchup` for a long time
 
-Isso é normal se houver muita carga de escrita. O `wal_keep_size = 256MB` ajuda, mas em ambientes de alta carga, aumente este valor ou configure um archive de WAL em storage compartilhado.
+This is normal under heavy write load. `wal_keep_size = 256MB` helps, but in high-load environments, increase this value or set up a WAL archive on shared storage.
 
 ---
 
-## Referências
+## References
 
 - [PostgreSQL Documentation - Streaming Replication](https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION)
 - [PostgreSQL Documentation - Synchronous Replication](https://www.postgresql.org/docs/current/synchronous-replication.html)
@@ -312,6 +312,6 @@ Isso é normal se houver muita carga de escrita. O `wal_keep_size = 256MB` ajuda
 
 ---
 
-## Licença
+## License
 
-Este template é open-source. Adapte conforme as necessidades do seu projeto.
+This template is open-source. Adapt it to your project's needs.
